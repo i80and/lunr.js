@@ -1867,6 +1867,38 @@ lunr.TokenStore.load = function (serialisedData) {
 }
 
 /**
+ * Converts the trie into a radix tree.
+ *
+ * @memberOf TokenStore
+ */
+lunr.TokenStore.prototype.compress = function () {
+  var queue = [this.root]
+
+  while (queue.length) {
+    var currentNode = queue.pop()
+    var currentKeys = Object.keys(currentNode)
+    for (var i = 0; i < currentKeys.length; i += 1) {
+      // Check if any children are single-element
+      var key = currentKeys[i]
+      var child = currentNode[key]
+
+      var childKeys = Object.keys(child)
+      if (childKeys.length === 1) {
+        // Collapse this child if there is not a corresponding token
+        var childKey = childKeys[0]
+        var newChildKey = key + childKey
+        var newChild = child[childKey]
+        currentNode[newChildKey] = newChild
+        queue.push(currentNode)
+        delete currentNode[key]
+      } else {
+        queue.push(child)
+      }
+    }
+  }
+}
+
+/**
  * Adds a new token doc pair to the store.
  *
  * By default this function starts at the root of the current store, however
@@ -1968,22 +2000,18 @@ lunr.TokenStore.prototype.remove = function (token, ref) {
  * @memberOf TokenStore
  */
 lunr.TokenStore.prototype.expand = function (token) {
-  var results = []
+  var results = Object.create(null)
   var nodeStack = [this.root]
   var keyStack = ['']
   var curNode
-
-  if (this.has(token)) {
-    results.push(token)
-  }
 
   while (nodeStack.length) {
     var curNode = nodeStack.pop()
     var curNodeKey = keyStack.pop()
 
     var curChildren = Object.keys(curNode)
-    for (var i = 0; i < curChildren.length; i += 1) {
-      var key = curChildren[i]
+    for (var childIndex = 0; childIndex < curChildren.length; childIndex += 1) {
+      var key = curChildren[childIndex]
       var fullKey = curNodeKey + key
       if (token.startsWith(fullKey)) {
         nodeStack.push(curNode[key])
@@ -1992,14 +2020,19 @@ lunr.TokenStore.prototype.expand = function (token) {
         nodeStack.push(curNode[key])
         keyStack.push(fullKey)
 
-        if (this.has(fullKey)) {
-          results.push(fullKey)
+        var tryKey = curNodeKey
+        for (var i = 0; i <= key.length; i += 1) {
+          if (this.has(tryKey)) {
+            results[tryKey] = 1
+          }
+
+          tryKey += key.charAt(i)
         }
       }
     }
   }
 
-  return results
+  return Object.keys(results)
 }
 
 /**
