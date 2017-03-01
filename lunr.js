@@ -1221,12 +1221,10 @@ lunr.Index.prototype.search = function (query) {
 
         // add all the documents that have this key into a set
         // ensuring that the type of key is preserved
-        var matchingDocuments = self.tokenStore.get(key),
-            refs = Object.keys(matchingDocuments),
-            refsLen = refs.length
-
-        for (var i = 0; i < refsLen; i++) {
-          set.add(matchingDocuments[refs[i]].ref)
+        var matchingDocuments = self.tokenStore.get(key)
+        for (var i = 0; i < matchingDocuments.length; i += 2) {
+          // Add document.ref. i+1 would be tf
+          set.add(matchingDocuments[i])
         }
 
         return memo.union(set)
@@ -1268,8 +1266,11 @@ lunr.Index.prototype.documentVector = function (documentRef) {
       documentVector = new lunr.Vector
 
   for (var i = 0; i < documentTokensLength; i++) {
+    // The tokenstore documents are stored in a list of [ref, tf, ref, tf...]
     var token = documentTokens.elements[i],
-        tf = this.tokenStore.get(token)[documentRef].tf,
+        docs = this.tokenStore.get(token),
+        doci = docs.indexOf(documentRef),
+        tf = docs[doci + 1],
         idf = this.idf(token)
 
     documentVector.insert(this.corpusTokens.indexOf(token), tf * idf)
@@ -1843,7 +1844,8 @@ lunr.Pipeline.registerFunction(lunr.trimmer, 'trimmer')
  * @constructor
  */
 lunr.TokenStore = function () {
-  this.root = { docs: {} }
+  this.root = Object.create(null)
+  this.tokens = Object.create(null)
   this.length = 0
 }
 
@@ -1858,6 +1860,7 @@ lunr.TokenStore.load = function (serialisedData) {
   var store = new this
 
   store.root = serialisedData.root
+  store.tokens = serialisedData.tokens
   store.length = serialisedData.length
 
   return store
@@ -1876,19 +1879,25 @@ lunr.TokenStore.load = function (serialisedData) {
  * is used.
  * @memberOf TokenStore
  */
-lunr.TokenStore.prototype.add = function (token, doc, root) {
+lunr.TokenStore.prototype.add = function (token, doc, root, origToken) {
   var root = root || this.root,
       key = token.charAt(0),
-      rest = token.slice(1)
+      rest = token.slice(1),
+      origToken = origToken || token
 
-  if (!(key in root)) root[key] = {docs: {}}
+  if (!(key in root)) root[key] = Object.create(null)
 
   if (rest.length === 0) {
-    root[key].docs[doc.ref] = doc
+    if (this.tokens[origToken]) {
+      this.tokens[origToken].push(doc.ref, doc.tf)
+    } else {
+      this.tokens[origToken] = [doc.ref, doc.tf]
+    }
+
     this.length += 1
     return
   } else {
-    return this.add(rest, doc, root[key])
+    return this.add(rest, doc, root[key], origToken)
   }
 }
 
@@ -1903,86 +1912,51 @@ lunr.TokenStore.prototype.add = function (token, doc, root) {
  * @memberOf TokenStore
  */
 lunr.TokenStore.prototype.has = function (token) {
-  if (!token) return false
-
-  var node = this.root
-
-  for (var i = 0; i < token.length; i++) {
-    if (!node[token.charAt(i)]) return false
-
-    node = node[token.charAt(i)]
-  }
-
-  return true
-}
-
-/**
- * Retrieve a node from the token store for a given token.
- *
- * By default this function starts at the root of the current store, however
- * it can start at any node of any token store if required.
- *
- * @param {String} token The token to get the node for.
- * @param {Object} root An optional node at which to start.
- * @returns {Object}
- * @see TokenStore.prototype.get
- * @memberOf TokenStore
- */
-lunr.TokenStore.prototype.getNode = function (token) {
-  if (!token) return {}
-
-  var node = this.root
-
-  for (var i = 0; i < token.length; i++) {
-    if (!node[token.charAt(i)]) return {}
-
-    node = node[token.charAt(i)]
-  }
-
-  return node
+  return this.tokens[token] !== undefined
 }
 
 /**
  * Retrieve the documents for a node for the given token.
  *
- * By default this function starts at the root of the current store, however
- * it can start at any node of any token store if required.
+ * Documents are returned in interleaved format to save memory. For
+ * example, docs[0] is a document ref; docs[1] is that document's tf;
+ * docs[2] is the next document's ref; etc.
  *
  * @param {String} token The token to get the documents for.
- * @param {Object} root An optional node at which to start.
- * @returns {Object}
+ * @returns {Array}
  * @memberOf TokenStore
  */
-lunr.TokenStore.prototype.get = function (token, root) {
-  return this.getNode(token, root).docs || {}
+lunr.TokenStore.prototype.get = function (token) {
+  return this.tokens[token] || []
 }
 
 lunr.TokenStore.prototype.count = function (token, root) {
-  return Object.keys(this.get(token, root)).length
+  return this.get(token, root).length / 2
 }
 
 /**
  * Remove the document identified by ref from the token in the store.
  *
- * By default this function starts at the root of the current store, however
- * it can start at any node of any token store if required.
- *
  * @param {String} token The token to get the documents for.
  * @param {String} ref The ref of the document to remove from this token.
- * @param {Object} root An optional node at which to start.
- * @returns {Object}
  * @memberOf TokenStore
  */
 lunr.TokenStore.prototype.remove = function (token, ref) {
-  if (!token) return
-  var node = this.root
+  var docsHavingToken = this.tokens[token]
+  if (!docsHavingToken) { return }
 
-  for (var i = 0; i < token.length; i++) {
-    if (!(token.charAt(i) in node)) return
-    node = node[token.charAt(i)]
+  var docIndex = docsHavingToken.indexOf(ref)
+  if (docIndex === -1) { return }
+
+  docsHavingToken.splice(docIndex, docIndex + 2)
+
+  if (docsHavingToken.length === 0) {
+    delete this.tokens[token]
   }
 
-  delete node.docs[ref]
+  // We can do additional cleanup of the tree, since there may be orphan nodes
+  // under the root that no longer correspond to a token. However, this could
+  // be time-consuming and shouldn't change results, so don't do here.
 }
 
 /**
@@ -1993,21 +1967,39 @@ lunr.TokenStore.prototype.remove = function (token, ref) {
  * @returns {Array}
  * @memberOf TokenStore
  */
-lunr.TokenStore.prototype.expand = function (token, memo) {
-  var root = this.getNode(token),
-      docs = root.docs || {},
-      memo = memo || []
+lunr.TokenStore.prototype.expand = function (token) {
+  var results = []
+  var nodeStack = [this.root]
+  var keyStack = ['']
+  var curNode
 
-  if (Object.keys(docs).length) memo.push(token)
+  if (this.has(token)) {
+    results.push(token)
+  }
 
-  Object.keys(root)
-    .forEach(function (key) {
-      if (key === 'docs') return
+  while (nodeStack.length) {
+    var curNode = nodeStack.pop()
+    var curNodeKey = keyStack.pop()
 
-      memo.concat(this.expand(token + key, memo))
-    }, this)
+    var curChildren = Object.keys(curNode)
+    for (var i = 0; i < curChildren.length; i += 1) {
+      var key = curChildren[i]
+      var fullKey = curNodeKey + key
+      if (token.startsWith(fullKey)) {
+        nodeStack.push(curNode[key])
+        keyStack.push(fullKey)
+      } else if (fullKey.startsWith(token)) {
+        nodeStack.push(curNode[key])
+        keyStack.push(fullKey)
 
-  return memo
+        if (this.has(fullKey)) {
+          results.push(fullKey)
+        }
+      }
+    }
+  }
+
+  return results
 }
 
 /**
@@ -2019,6 +2011,7 @@ lunr.TokenStore.prototype.expand = function (token, memo) {
 lunr.TokenStore.prototype.toJSON = function () {
   return {
     root: this.root,
+    tokens: this.tokens,
     length: this.length
   }
 }

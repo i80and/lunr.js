@@ -60,7 +60,7 @@ test('adding a document with an empty field', function () {
   idx.field('body')
 
   idx.add(doc)
-  ok(!isNaN(idx.tokenStore.get('test')[1].tf))
+  ok(!isNaN(idx.tokenStore.get('test')[1]))
 })
 
 test('ignore empty tokens', function () {

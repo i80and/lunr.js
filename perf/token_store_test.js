@@ -5,10 +5,6 @@
     var store = lunr.TokenStore.load(questionsIdx.tokenStore)
   }
 
-  bench('tokenStore#getNode', function () {
-    store.getNode('javascript')
-  }, { setup: setup })
-
   bench('tokenStore#has non existant term', function () {
     store.has('qwertyuiop')
   }, { setup: setup })

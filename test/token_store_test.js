@@ -7,7 +7,8 @@ test('adding a token to the store', function () {
 
   store.add(token, doc)
 
-  ok(store.root['f']['o']['o']['docs'][123] === doc)
+  deepEqual(store.root['f']['o']['o'], {})
+  deepEqual(store.tokens['foo'], [123, 1])
   equal(store.length, 1)
 })
 
@@ -20,8 +21,8 @@ test('adding another document to the token', function () {
   store.add(token, doc1)
   store.add(token, doc2)
 
-  ok(store.root['f']['o']['o']['docs'][123] === doc1)
-  ok(store.root['f']['o']['o']['docs'][456] === doc2)
+  deepEqual(store.root['f']['o']['o'], {})
+  deepEqual(store.tokens['foo'], [123, 1, 456, 1])
 })
 
 test('checking if a token exists in the store', function () {
@@ -50,17 +51,15 @@ test('retrieving items from the store', function () {
       token = 'foo'
 
   store.add(token, doc)
-  deepEqual(store.get(token), {
-    '123': doc
-  })
+  deepEqual(store.get(token), [123, 1])
 
-  deepEqual(store.get(''), {})
+  deepEqual(store.get(''), [])
 })
 
 test('retrieving items that do not exist in the store', function () {
   var store = new lunr.TokenStore
 
-  deepEqual(store.get('foo'), {})
+  deepEqual(store.get('foo'), [])
 })
 
 test('counting items in the store', function () {
@@ -82,14 +81,12 @@ test('removing a document from the token store', function () {
   var store = new lunr.TokenStore,
       doc = { ref: 123, tf: 1 }
 
-  deepEqual(store.get('foo'), {})
+  deepEqual(store.get('foo'), [])
   store.add('foo', doc)
-  deepEqual(store.get('foo'), {
-    '123': doc
-  })
+  deepEqual(store.get('foo'), [123, 1])
 
   store.remove('foo', 123)
-  deepEqual(store.get('foo'), {})
+  deepEqual(store.get('foo'), [])
 })
 
 test('removing a document that is not in the store', function () {
@@ -101,7 +98,7 @@ test('removing a document that is not in the store', function () {
   store.add('bar', doc2)
   store.remove('foo', 456)
 
-  deepEqual(store.get('foo'), { 123: doc1 })
+  deepEqual(store.get('foo'), [123, 1])
 })
 
 test('removing a document from a key that does not exist', function () {
@@ -123,27 +120,23 @@ test('expand a token into all descendent tokens', function () {
   store.add('bar', doc)
 
   var tokens = store.expand('hel')
-  deepEqual(tokens, ['hell', 'hello', 'help', 'held'])
+  deepEqual(tokens.sort(), ['hell', 'hello', 'help', 'held'].sort())
 })
 
 test('serialisation', function () {
   var store = new lunr.TokenStore
 
-  deepEqual(store.toJSON(), { root: { docs: {} }, length: 0 })
+  deepEqual(store.toJSON(), { tokens: { }, root: { }, length: 0 })
 
   store.add('foo', { ref: 123, tf: 1 })
 
   deepEqual(store.toJSON(),
     {
+      tokens: { 'foo': [123, 1] },
       root: {
-        docs: {},
         f: {
-          docs: {},
           o: {
-            docs: {},
-            o: {
-              docs: { 123: { ref: 123, tf: 1 } }
-            }
+            o: { }
           }
         }
       },
@@ -154,15 +147,11 @@ test('serialisation', function () {
 
 test('loading a serialised story', function () {
   var serialisedData = {
+    tokens: { 'foo': [123, 1] },
     root: {
-      docs: {},
       f: {
-        docs: {},
         o: {
-          docs: {},
-          o: {
-            docs: { 123: { ref: 123, tf: 1 } }
-          }
+          o: { }
         }
       }
     },
@@ -173,5 +162,5 @@ test('loading a serialised story', function () {
       documents = store.get('foo')
 
   equal(store.length, 1)
-  deepEqual(documents, { 123: { ref: 123, tf: 1 }})
+  deepEqual(documents, [123, 1])
 })
